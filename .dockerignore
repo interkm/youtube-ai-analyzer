@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+backend/.env
+*.egg-info/
+.venv/
+venv/
+
+# Node
+frontend/node_modules/
+frontend/.env.local
+
+# Git
+.git/
+.gitignore
+
+# Vercel
+.vercel/
+vercel.json
+api/
+
+# Docker
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db

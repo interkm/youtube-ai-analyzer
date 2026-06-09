@@ -2,6 +2,8 @@ import os
 import json
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from typing import Optional
@@ -152,6 +154,24 @@ async def analyze_video(req: AnalyzeRequest):
         "transcript_entries": transcript_entries,
         "analysis": analysis_result["data"],
     }
+
+
+# ── React 프론트엔드 정적 파일 서빙 (Railway 배포용) ─────────────────────
+FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "frontend_dist")
+
+if os.path.exists(FRONTEND_DIST):
+    # /assets 경로: JS·CSS·이미지 등 번들 파일
+    assets_dir = os.path.join(FRONTEND_DIST, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        """SPA catch-all: 정적 파일이 있으면 반환, 없으면 index.html 반환."""
+        file_path = os.path.join(FRONTEND_DIST, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
 
 
 if __name__ == "__main__":

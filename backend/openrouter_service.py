@@ -1,3 +1,4 @@
+import os
 import httpx
 import json
 import re
@@ -43,10 +44,13 @@ async def analyze_with_openrouter(
         view_count_str=view_count_str,
     )
 
+    _referer = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "http://localhost:5173")
+    if _referer and not _referer.startswith("http"):
+        _referer = f"https://{_referer}"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:5173",
+        "HTTP-Referer": _referer,
         "X-Title": "YouTube AI Analyzer",
     }
 
