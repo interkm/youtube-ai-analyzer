@@ -16,12 +16,17 @@ from youtube_service import (
     format_duration,
     format_number,
 )
-from gemini_service import analyze_with_gemini
-from openrouter_service import analyze_with_openrouter, OPENROUTER_MODELS, DEFAULT_MODEL
+from gemini_service import analyze_with_gemini, generate_transformation
+from openrouter_service import (
+    analyze_with_openrouter,
+    OPENROUTER_MODELS,
+    DEFAULT_MODEL,
+    generate_transformation_with_openrouter,
+)
 
 load_dotenv()
 
-app = FastAPI(title="유튜브 분석 API", version="2.0.0")
+app = FastAPI(title="유튜브 분석 API", version="2.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -37,15 +42,33 @@ class AnalyzeRequest(BaseModel):
     api_key: Optional[str] = None
     api_provider: Optional[str] = "gemini"   # "gemini" | "openrouter"
     model: Optional[str] = None              # OpenRouter 모델명 (선택)
+    analysis_mode: Optional[str] = "summary"  # 분석 모드 추가
 
 
 class VideoInfoRequest(BaseModel):
     url: str
 
 
+class SaveObsidianRequest(BaseModel):
+    vault_path: str
+    file_name: str
+    content: str
+
+
+class TransformRequest(BaseModel):
+    title: str
+    channel: str
+    analysis_data: dict
+    transcript: str
+    transform_type: str
+    api_key: Optional[str] = None
+    api_provider: Optional[str] = "gemini"
+    model: Optional[str] = None
+
+
 @app.get("/")
 def root():
-    return {"status": "ok", "message": "유튜브 분석 API v2가 실행 중입니다.", "version": "2.0.0"}
+    return {"status": "ok", "message": "유튜브 분석 API v2.1이 실행 중입니다.", "version": "2.1.0"}
 
 
 @app.get("/api/models")
@@ -80,6 +103,7 @@ async def analyze_video(req: AnalyzeRequest):
     """유튜브 영상을 전체 분석합니다. (Gemini 또는 OpenRouter 선택 가능)"""
 
     provider = (req.api_provider or "gemini").lower()
+    mode = req.analysis_mode or "summary"
 
     # API 키 확인
     if provider == "openrouter":
@@ -121,6 +145,7 @@ async def analyze_video(req: AnalyzeRequest):
         transcript_lang=transcript_lang,
         duration_str=duration_str,
         view_count_str=view_count_str,
+        analysis_mode=mode,
     )
 
     # AI 분석 실행
@@ -136,10 +161,14 @@ async def analyze_video(req: AnalyzeRequest):
             detail=f"AI 분석 실패: {analysis_result.get('error', '알 수 없는 오류')}"
         )
 
+    # 모델명 가공
+    model_name = provider == "openrouter" and (req.model or DEFAULT_MODEL) or "gemini-2.0-flash"
+
     return {
         "video_id": video_id,
         "url": f"https://www.youtube.com/watch?v={video_id}",
         "provider": provider,
+        "model_used": model_name,
         "metadata": {
             **metadata,
             "duration_str": duration_str,
@@ -154,6 +183,77 @@ async def analyze_video(req: AnalyzeRequest):
         "transcript_entries": transcript_entries,
         "analysis": analysis_result["data"],
     }
+
+
+@app.post("/api/save-obsidian")
+async def save_obsidian(req: SaveObsidianRequest):
+    """사용자가 입력한 로컬 경로에 Obsidian 마크다운 파일을 저장합니다 (로컬 작동용)."""
+    try:
+        # 디렉토리가 없으면 생성 시도
+        normalized_path = os.path.abspath(req.vault_path)
+        if not os.path.exists(normalized_path):
+            os.makedirs(normalized_path, exist_ok=True)
+
+        # 특수문자나 파일명 정규화
+        safe_file_name = req.file_name
+        for char in ['\\', '/', ':', '*', '?', '"', '<', '>', '|']:
+            safe_file_name = safe_file_name.replace(char, '_')
+
+        file_path = os.path.join(normalized_path, safe_file_name)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(req.content)
+
+        return {
+            "success": True,
+            "message": f"Obsidian 파일이 성공적으로 저장되었습니다: {file_path}",
+            "file_path": file_path
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Obsidian 파일 저장에 실패했습니다: {str(e)}"
+        )
+
+
+@app.post("/api/transform")
+async def transform_content(req: TransformRequest):
+    """자막 및 1차 분석데이터를 기반으로 4종(적용안/블로그/랜딩/Hermes) 전문 문서로 변환합니다."""
+    provider = (req.api_provider or "gemini").lower()
+
+    if provider == "openrouter":
+        api_key = req.api_key or os.getenv("OPENROUTER_API_KEY", "")
+        if not api_key:
+            raise HTTPException(status_code=400, detail="OpenRouter API 키가 필요합니다.")
+        model = req.model or DEFAULT_MODEL
+        res = await generate_transformation_with_openrouter(
+            api_key=api_key,
+            title=req.title,
+            channel=req.channel,
+            analysis_data=req.analysis_data,
+            transcript=req.transcript,
+            transform_type=req.transform_type,
+            model=model
+        )
+    else:
+        api_key = req.api_key or os.getenv("GEMINI_API_KEY", "")
+        if not api_key or api_key == "your_gemini_api_key_here":
+            raise HTTPException(status_code=400, detail="Gemini API 키가 필요합니다.")
+        res = await generate_transformation(
+            api_key=api_key,
+            title=req.title,
+            channel=req.channel,
+            analysis_data=req.analysis_data,
+            transcript=req.transcript,
+            transform_type=req.transform_type
+        )
+
+    if not res["success"]:
+        raise HTTPException(
+            status_code=500,
+            detail=f"변환 생성 실패: {res.get('error', '알 수 없는 오류')}"
+        )
+
+    return {"success": True, "result": res["result"]}
 
 
 # ── React 프론트엔드 정적 파일 서빙 (Railway 배포용) ─────────────────────
