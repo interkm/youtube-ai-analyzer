@@ -697,8 +697,11 @@ export default function App() {
         {isLoading && (
           <div className="loading-section">
             <div className="loading-spinner" />
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '8px', fontSize: '0.9rem' }}>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '4px', fontSize: '0.9rem' }}>
               AI가 영상을 분석하고 있습니다...
+            </p>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '8px', fontSize: '0.78rem' }}>
+              첫 요청은 서버 준비로 30초~1분 소요될 수 있습니다
             </p>
             <div className="loading-steps">
               {loadingStepsList.map(s => {
